@@ -1,0 +1,10 @@
+
+Debug/
+
+imgs/
+
+.vscode/settings.json
+
+src/CMakeLists.txt
+
+src/README.txt
