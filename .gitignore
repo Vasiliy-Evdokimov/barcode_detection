@@ -8,3 +8,9 @@ imgs/
 src/CMakeLists.txt
 
 src/README.txt
+
+src/edge-impulse-sdk/
+
+src/tflite-model/
+
+src/model-parameters/

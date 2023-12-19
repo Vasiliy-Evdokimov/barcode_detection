@@ -29,6 +29,8 @@ using namespace cv;
 #define CLR_CYAN	(cv::Scalar(0xFF, 0xFF, 0x00))
 #define CLR_WHITE	(cv::Scalar(0xFF, 0xFF, 0xFF))
 
+cv::Scalar templates_clr[] { CLR_YELLOW, CLR_MAGENTA, CLR_CYAN, CLR_BLUE, CLR_GREEN };
+
 string CAMERA_ADDRESS = "rtsp://admin:1234qwer@192.168.31.63:554/streaming/channels/2";
 string calibration_file_path = "/home/vevdokimov/eclipse-workspace/line_detection/config/calibration.xml";
 
@@ -423,6 +425,184 @@ void detect_barcode_lines()
 
 }
 
+cv::Mat undistorted_template;
+std::vector<Point> template_points;
+std::vector<Mat> templates;
+
+void onMouse(int event, int x, int y, int flags, void* userdata)
+{
+	if (event == cv::EVENT_LBUTTONDOWN)
+	{
+		std::cout << "Left button of the mouse is clicked - position (" << x << ", " << y << ")" << std::endl;
+		//
+		if (template_points.size() == 0)
+		{
+			template_points.push_back(Point(x, y));
+			template_points.push_back(Point(x, y));
+		}
+		else if (template_points.size() == 2)
+		{
+			Rect template_roi(
+				template_points[0],
+				template_points[1]
+			);
+
+			Mat ROI(undistorted_template, template_roi);
+			Mat croppedImage;
+			ROI.copyTo(croppedImage);
+			templates.push_back(croppedImage);
+
+			template_points.clear();
+		}
+	}
+	else if (event == cv::EVENT_RBUTTONDOWN)
+	{
+		std::cout << "Right button of the mouse is clicked - position (" << x << ", " << y << ")" << std::endl;
+	}
+	else if (event == cv::EVENT_MBUTTONDOWN)
+	{
+		std::cout << "Middle button of the mouse is clicked - position (" << x << ", " << y << ")" << std::endl;
+		//
+		template_points.clear();
+	}
+	else if (event == cv::EVENT_MOUSEMOVE)
+	{
+		if (template_points.size() == 2)
+		{
+			template_points[1].x = x;
+			template_points[1].y = y;
+		}
+	}
+}
+
+void detect_template()
+{
+	const string TEMPLATE_WND_NAME = "Template";
+	//
+	namedWindow(TEMPLATE_WND_NAME);
+	setMouseCallback(TEMPLATE_WND_NAME, onMouse);
+	//
+	cv::VideoCapture capture;
+	cv::Mat frame, undistorted_to_show;
+
+	capture.open(CAMERA_ADDRESS);
+
+	double threshold = 0.8;	// порог сходства
+
+	for (int i = 0; i < 20; i++)
+		capture >> frame;
+
+	while (1) {
+
+		if (capture.read(frame)) {
+
+			try
+			{
+				undistort(frame, undistorted_template, cameraMatrix, distCoeffs);
+			}
+			catch (...)
+			{
+				cout << "Undistortion error!" << endl;
+				continue;
+			}
+
+			undistorted_to_show = undistorted_template.clone();
+
+			cv::Rect analysis_roi(
+				undistorted_template.cols / 2 - IMAGE_SIDE / 2,
+				0,
+				IMAGE_SIDE,
+				undistorted_template.rows / 2
+			);
+
+			Mat img = undistorted_template(analysis_roi);
+			Mat mask, result;
+			//
+			int match_method = 5;
+//				0 TM_SQDIFF; M
+//				1 TM_SQDIFF_NORMED;
+//				2 TM_CCORR;
+//				3 TM_CCORR_NORMED; M
+//				4 TM_CCOEFF;
+//				5 TM_CCOEFF_NORMED;
+			//
+			bool use_mask = false;
+
+			for (size_t i = 0; i < templates.size(); i++)
+			{
+				Mat templ = templates[i];
+				//
+				Mat img_display;
+				img.copyTo( img_display );
+				int result_cols = img.cols - templ.cols + 1;
+				int result_rows = img.rows - templ.rows + 1;
+				result.create( result_rows, result_cols, CV_32FC1 );
+				bool method_accepts_mask = (TM_SQDIFF == match_method || match_method == TM_CCORR_NORMED);
+				if (use_mask && method_accepts_mask)
+				{
+					matchTemplate( img, templ, result, match_method, mask);
+				}
+				else
+				{
+					matchTemplate( img, templ, result, match_method);
+				}
+				//normalize( result, result, 0, 1, NORM_MINMAX, -1, Mat() );
+				double minVal; double maxVal; Point minLoc; Point maxLoc;
+				Point matchLoc; double matchVal;
+				minMaxLoc( result, &minVal, &maxVal, &minLoc, &maxLoc, Mat() );
+				if ( match_method  == TM_SQDIFF || match_method == TM_SQDIFF_NORMED )
+				{
+					matchLoc = minLoc;
+					matchVal = minVal;
+				}
+				else
+				{
+					matchLoc = maxLoc;
+					matchVal = maxVal;
+				}
+
+				cout << "templ_" << i <<
+					" minVal=" << minVal <<
+					" maxVal=" << maxVal <<
+					" matchVal=" << matchVal
+				<< endl;
+
+				//
+				if (matchVal >= threshold)
+				{
+					Scalar clr = templates_clr[ i % (sizeof(templates_clr) / sizeof(templates_clr[0])) ];
+					rectangle(undistorted_to_show,
+						matchLoc + analysis_roi.tl(),
+						Point( matchLoc.x + templ.cols , matchLoc.y + templ.rows ) + analysis_roi.tl(),
+						clr, 2, 8, 0
+					);
+					putText(undistorted_to_show,
+						"templ_" + to_string(i),
+						matchLoc + Point(10, 15) + analysis_roi.tl(),
+						cv::FONT_HERSHEY_SIMPLEX, 0.4, clr, 1
+					);
+				}
+			}
+
+			rectangle(undistorted_to_show, analysis_roi.tl(), analysis_roi.br(), CLR_MAGENTA, 2);
+
+			if (template_points.size() == 2)
+				rectangle( undistorted_to_show, template_points[0], template_points[1], CLR_GREEN, 2, 8, 0 );
+
+			cv::imshow(TEMPLATE_WND_NAME, undistorted_to_show);
+
+			for (size_t i = 0; i < templates.size(); i++)
+				cv::imshow("templ_" + to_string(i), templates[i]);
+
+		}
+
+		int key = cv::waitKey(1);
+
+		if (key == 27)
+			break;
+	}
+
+}
 
 int main()
 {
@@ -437,14 +617,16 @@ int main()
 //	read_file("raw_data/bar2_120.txt");
 //	return 0;
 
-
 //	collect_images();
 //	return 0;
 
 //	detect_barcode_ei();
 //	return 0;
 
-	detect_barcode_lines();
+//	detect_barcode_lines();
+//	return 0;
+
+	detect_template();
 	return 0;
 
 	return 0;
