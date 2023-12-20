@@ -428,6 +428,13 @@ void detect_barcode_lines()
 cv::Mat undistorted_template;
 std::vector<Point> template_points;
 std::vector<Mat> templates;
+int templ_func_id = 0;
+
+int barcount = 0;
+
+const string config_folder = "config/";
+const string config_filename = "barcode_detection.cfg";
+const string config_filepath = config_folder + config_filename;
 
 void onMouse(int event, int x, int y, int flags, void* userdata)
 {
@@ -475,8 +482,58 @@ void onMouse(int event, int x, int y, int flags, void* userdata)
 	}
 }
 
+void load_config()
+{
+	cout << "config_filepath = " << config_filepath << endl;
+	barcount = 0;
+	//
+	std::ifstream file(config_filepath);
+	if (!file) {
+		cout << "load_config() file open error!" << endl;
+	} else {
+		//
+		while (file >> barcount)
+		{
+			//
+		}
+		//
+		file.close();
+		cout << "load_config() successfully! barcount = " << barcount << endl;
+	}
+	//
+	for (int i = 0; i < barcount; i++) {
+		string filepath = config_folder + "barcode" + to_string(i) + ".jpg";
+		Mat templ_file = imread(filepath);
+		templates.push_back(templ_file);
+	}
+}
+
+void save_config()
+{
+	cout << "config_filepath = " << config_filepath << endl;
+	//
+	std::ofstream out;
+	out.open(config_filepath);
+	if (!out.is_open()) {
+		cout << "save_config() file open error!" << endl;
+	} else {
+		//
+		out << templates.size() << endl;
+		//
+		out.close();
+		cout << "save_config() successfully!" << endl;
+	}
+	//
+	for (int i = 0; i < templates.size(); i++) {
+		string filepath = config_folder + "barcode" + to_string(i) + ".jpg";
+		imwrite(filepath, templates[i]);
+	}
+}
+
 void detect_template()
 {
+	load_config();
+
 	const string TEMPLATE_WND_NAME = "Template";
 	//
 	namedWindow(TEMPLATE_WND_NAME);
@@ -561,11 +618,11 @@ void detect_template()
 					matchVal = maxVal;
 				}
 
-				cout << "templ_" << i <<
-					" minVal=" << minVal <<
-					" maxVal=" << maxVal <<
-					" matchVal=" << matchVal
-				<< endl;
+//				cout << "templ_" << i <<
+//					" minVal=" << minVal <<
+//					" maxVal=" << maxVal <<
+//					" matchVal=" << matchVal
+//				<< endl;
 
 				//
 				if (matchVal >= threshold)
@@ -597,6 +654,19 @@ void detect_template()
 		}
 
 		int key = cv::waitKey(1);
+
+		if (key != -1)
+			cout << "key = " << key << endl;
+
+		if (key == 102) // f
+			templ_func_id++;
+
+		if (key == 120) // x
+			templ_func_id = 0;
+
+		if (key == 115) // s
+			save_config();
+
 
 		if (key == 27)
 			break;
