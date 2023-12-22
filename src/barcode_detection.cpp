@@ -31,7 +31,7 @@ using namespace cv;
 
 cv::Scalar templates_clr[] { CLR_YELLOW, CLR_MAGENTA, CLR_CYAN, CLR_BLUE, CLR_GREEN };
 
-string CAMERA_ADDRESS = "rtsp://admin:1234qwer@192.168.31.63:554/streaming/channels/2";
+string CAMERA_ADDRESS = "rtsp://admin:1234qwer@192.168.1.63:554/streaming/channels/2";
 string calibration_file_path = "/home/vevdokimov/eclipse-workspace/line_detection/config/calibration.xml";
 
 cv::Mat cameraMatrix;
@@ -428,6 +428,7 @@ void detect_barcode_lines()
 cv::Mat undistorted_template;
 std::vector<Point> template_points;
 std::vector<Mat> templates;
+std::vector<double> templates_match;
 int templ_func_id = 0;
 
 int barcount = 0;
@@ -435,6 +436,9 @@ int barcount = 0;
 const string config_folder = "config/";
 const string config_filename = "barcode_detection.cfg";
 const string config_filepath = config_folder + config_filename;
+
+//#define UNDISTORT
+//#define NO_GUI
 
 void onMouse(int event, int x, int y, int flags, void* userdata)
 {
@@ -458,6 +462,7 @@ void onMouse(int event, int x, int y, int flags, void* userdata)
 			Mat croppedImage;
 			ROI.copyTo(croppedImage);
 			templates.push_back(croppedImage);
+			templates_match.push_back(0.5);
 
 			template_points.clear();
 		}
@@ -486,19 +491,30 @@ void load_config()
 {
 	cout << "config_filepath = " << config_filepath << endl;
 	barcount = 0;
+	templates_match.clear();
 	//
 	std::ifstream file(config_filepath);
 	if (!file) {
 		cout << "load_config() file open error!" << endl;
 	} else {
 		//
-		while (file >> barcount)
+		string s;
+		int i = 0;
+		while (getline(file, s))
 		{
+			if (!i)
+				barcount = stoi(s);
+			else
+				templates_match.push_back(stod(s));
 			//
+			i++;
 		}
 		//
 		file.close();
 		cout << "load_config() successfully! barcount = " << barcount << endl;
+		cout << "templates_matches: " << endl;
+		for (size_t j = 0; j < templates_match.size(); j++)
+			cout << templates_match[j] << endl;
 	}
 	//
 	for (int i = 0; i < barcount; i++) {
@@ -519,43 +535,98 @@ void save_config()
 	} else {
 		//
 		out << templates.size() << endl;
+		for (size_t i = 0; i < templates_match.size(); i++)
+			out << templates_match[i] << endl;
 		//
 		out.close();
 		cout << "save_config() successfully!" << endl;
 	}
 	//
-	for (int i = 0; i < templates.size(); i++) {
+	for (size_t i = 0; i < templates.size(); i++) {
 		string filepath = config_folder + "barcode" + to_string(i) + ".jpg";
 		imwrite(filepath, templates[i]);
 	}
 }
 
-void detect_template()
+Mat frame_to_show;
+
+const string TEST_WND_NAME = "Barcode Test";
+
+void visualizer_func() {
+
+	pthread_setname_np(pthread_self(), "visualizer thread");
+
+	cout << "visualizer_func() started!" << endl;
+	cout << "visualizer_func() entered infinity loop." << endl;
+
+	while (true)
+	{
+		if (!frame_to_show.empty())
+		{
+			Mat frame = frame_to_show.clone();
+			//
+			cv::imshow(TEST_WND_NAME, frame);
+		}
+		//
+		cv::waitKey(1);
+	}
+
+}
+
+void detect_template_func()
 {
 	load_config();
 
 	const string TEMPLATE_WND_NAME = "Template";
 	//
-	namedWindow(TEMPLATE_WND_NAME);
-	setMouseCallback(TEMPLATE_WND_NAME, onMouse);
+#ifndef NO_GUI
+//	namedWindow(TEMPLATE_WND_NAME);
+//	setMouseCallback(TEMPLATE_WND_NAME, onMouse);
+#endif
 	//
 	cv::VideoCapture capture;
 	cv::Mat frame, undistorted_to_show;
 
 	capture.open(CAMERA_ADDRESS);
 
-	double threshold = 0.8;	// порог сходства
-
 	for (int i = 0; i < 20; i++)
-		capture >> frame;
+		capture.grab();
+
+	clock_t tStart;
+
+	double tt, tt_sum, tt_min, tt_max;
+	int tt_cnt = 0;
+
+	double targetfps = 25;
+	double tt_elapsed, tt_prev = clock();
+	int fps_count = 0;
 
 	while (1) {
 
-		if (capture.read(frame)) {
+		capture.read(frame);
+
+		fps_count++;
+		tt_elapsed = (double)(clock() - tt_prev) / CLOCKS_PER_SEC;
+		if (tt_elapsed < (1. / targetfps))
+			continue;
+
+//		cout << "fps_count = " << fps_count << " tt_elapsed = " << tt_elapsed << endl;
+
+		fps_count = 0;
+		tt_prev = clock();
+
+		//if (capture.read(frame))
+		{
+
+			tStart = clock();
 
 			try
 			{
+	#ifdef UNDISTORT
 				undistort(frame, undistorted_template, cameraMatrix, distCoeffs);
+	#else
+				undistorted_template = frame.clone();
+	#endif
 			}
 			catch (...)
 			{
@@ -625,8 +696,9 @@ void detect_template()
 //				<< endl;
 
 				//
-				if (matchVal >= threshold)
+				if (matchVal >= templates_match[i])
 				{
+			#ifndef NO_GUI
 					Scalar clr = templates_clr[ i % (sizeof(templates_clr) / sizeof(templates_clr[0])) ];
 					rectangle(undistorted_to_show,
 						matchLoc + analysis_roi.tl(),
@@ -638,38 +710,66 @@ void detect_template()
 						matchLoc + Point(10, 15) + analysis_roi.tl(),
 						cv::FONT_HERSHEY_SIMPLEX, 0.4, clr, 1
 					);
+					putText(undistorted_to_show,
+						to_string(matchVal),
+						matchLoc + Point(10, 30) + analysis_roi.tl(),
+						cv::FONT_HERSHEY_SIMPLEX, 0.4, clr, 1
+					);
+			#endif
+					//
+					cout << "templ_" << to_string(i) << " found!  " << matchVal << endl;
 				}
 			}
 
+			tt = (double)(clock() - tStart) / CLOCKS_PER_SEC;
+			if (!tt_cnt) { tt_sum = 0; tt_max = tt; tt_min = tt; }
+			//
+			if (tt > tt_max) tt_max = tt;
+			if (tt < tt_min) tt_min = tt;
+			tt_sum += tt;
+			tt_cnt++;
+
+			if (tt_cnt >= 100)
+			{
+				cout <<
+					" min=" << tt_min <<
+					" max=" << tt_max <<
+					" avg=" << (tt_sum / tt_cnt)
+				<< endl	;
+				//
+				tt_cnt = 0;
+			}
+	#ifndef NO_GUI
 			rectangle(undistorted_to_show, analysis_roi.tl(), analysis_roi.br(), CLR_MAGENTA, 2);
 
 			if (template_points.size() == 2)
 				rectangle( undistorted_to_show, template_points[0], template_points[1], CLR_GREEN, 2, 8, 0 );
 
-			cv::imshow(TEMPLATE_WND_NAME, undistorted_to_show);
+			//cv::imshow(TEMPLATE_WND_NAME, undistorted_to_show);
+			frame_to_show = undistorted_to_show.clone();
 
-			for (size_t i = 0; i < templates.size(); i++)
-				cv::imshow("templ_" + to_string(i), templates[i]);
-
+//			for (size_t i = 0; i < templates.size(); i++)
+//				cv::imshow("templ_" + to_string(i), templates[i]);
+	#endif
 		}
 
-		int key = cv::waitKey(1);
+//		int key = cv::waitKey(1);
+//
+//		if (key != -1)
+//			cout << "key = " << key << endl;
+//
+//		if (key == 102) // f
+//			templ_func_id++;
+//
+//		if (key == 120) // x
+//			templ_func_id = 0;
+//
+//		if (key == 115) // s
+//			save_config();
+//
+//		if (key == 27)
+//			break;
 
-		if (key != -1)
-			cout << "key = " << key << endl;
-
-		if (key == 102) // f
-			templ_func_id++;
-
-		if (key == 120) // x
-			templ_func_id = 0;
-
-		if (key == 115) // s
-			save_config();
-
-
-		if (key == 27)
-			break;
 	}
 
 }
@@ -678,10 +778,12 @@ int main()
 {
 	cout << "OpenCV: " << cv::getBuildInformation() << endl;
 
+#ifdef UNDISTORT
 	cv::FileStorage fs(calibration_file_path, cv::FileStorage::READ);
 	fs["cameraMatrix"] >> cameraMatrix;
 	fs["distCoeffs"] >> distCoeffs;
 	fs.release();
+#endif
 
 //	read_file("raw_data/bar1_120.txt");
 //	read_file("raw_data/bar2_120.txt");
@@ -696,8 +798,18 @@ int main()
 //	detect_barcode_lines();
 //	return 0;
 
-	detect_template();
-	return 0;
+	thread detect_template_thread(detect_template_func);
+	std::this_thread::sleep_for(1s);
+	thread visualizer_thread(visualizer_func);
+	//
+	if (detect_template_thread.joinable()) detect_template_thread.join();
+	if (visualizer_thread.joinable()) visualizer_thread.join();
+
+	while (true) {
+		//
+		this_thread::sleep_for(100ms);
+		//
+	}
 
 	return 0;
 }
