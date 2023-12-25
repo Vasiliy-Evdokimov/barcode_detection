@@ -552,12 +552,15 @@ Mat frame_to_show;
 
 const string TEST_WND_NAME = "Barcode Test";
 
-void visualizer_func() {
-
+void visualizer_func()
+{
 	pthread_setname_np(pthread_self(), "visualizer thread");
 
 	cout << "visualizer_func() started!" << endl;
 	cout << "visualizer_func() entered infinity loop." << endl;
+
+	namedWindow(TEST_WND_NAME);
+	setMouseCallback(TEST_WND_NAME, onMouse);
 
 	while (true)
 	{
@@ -568,22 +571,34 @@ void visualizer_func() {
 			cv::imshow(TEST_WND_NAME, frame);
 		}
 		//
-		cv::waitKey(1);
-	}
+		int key = cv::waitKey(1);
 
+		if (key != -1)
+			cout << "key = " << key << endl;
+
+		if (key == 102) // f
+			templ_func_id++;
+
+		if (key == 120) // x
+			templ_func_id = 0;
+
+		if (key == 115) // s
+			save_config();
+
+		if (key == 27)
+			break;
+	}
 }
 
 void detect_template_func()
 {
+	pthread_setname_np(pthread_self(), "detect_template thread");
+
+	cout << "detect_template_func() started!" << endl;
+	cout << "detect_template_func() entered infinity loop." << endl;
+
 	load_config();
 
-	const string TEMPLATE_WND_NAME = "Template";
-	//
-#ifndef NO_GUI
-//	namedWindow(TEMPLATE_WND_NAME);
-//	setMouseCallback(TEMPLATE_WND_NAME, onMouse);
-#endif
-	//
 	cv::VideoCapture capture;
 	cv::Mat frame, undistorted_to_show;
 
@@ -601,14 +616,16 @@ void detect_template_func()
 	double tt_elapsed, tt_prev = clock();
 	int fps_count = 0;
 
-	while (1) {
-
-		capture.read(frame);
+	while (1)
+	{
+		capture.grab();
 
 		fps_count++;
 		tt_elapsed = (double)(clock() - tt_prev) / CLOCKS_PER_SEC;
 		if (tt_elapsed < (1. / targetfps))
 			continue;
+
+		capture.retrieve(frame);
 
 //		cout << "fps_count = " << fps_count << " tt_elapsed = " << tt_elapsed << endl;
 
@@ -752,26 +769,28 @@ void detect_template_func()
 //				cv::imshow("templ_" + to_string(i), templates[i]);
 	#endif
 		}
-
-//		int key = cv::waitKey(1);
-//
-//		if (key != -1)
-//			cout << "key = " << key << endl;
-//
-//		if (key == 102) // f
-//			templ_func_id++;
-//
-//		if (key == 120) // x
-//			templ_func_id = 0;
-//
-//		if (key == 115) // s
-//			save_config();
-//
-//		if (key == 27)
-//			break;
-
 	}
 
+}
+
+void template_detector()
+{
+	thread detect_template_thread(detect_template_func);
+#ifndef NO_GUI
+	std::this_thread::sleep_for(1s);
+	thread visualizer_thread(visualizer_func);
+#endif
+	//
+	if (detect_template_thread.joinable()) detect_template_thread.join();
+#ifndef NO_GUI
+	if (visualizer_thread.joinable()) visualizer_thread.join();
+#endif
+	//
+	while (true) {
+		//
+		this_thread::sleep_for(100ms);
+		//
+	}
 }
 
 int main()
@@ -798,18 +817,7 @@ int main()
 //	detect_barcode_lines();
 //	return 0;
 
-	thread detect_template_thread(detect_template_func);
-	std::this_thread::sleep_for(1s);
-	thread visualizer_thread(visualizer_func);
-	//
-	if (detect_template_thread.joinable()) detect_template_thread.join();
-	if (visualizer_thread.joinable()) visualizer_thread.join();
-
-	while (true) {
-		//
-		this_thread::sleep_for(100ms);
-		//
-	}
+	template_detector();
 
 	return 0;
 }
