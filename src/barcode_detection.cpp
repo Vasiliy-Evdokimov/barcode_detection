@@ -17,6 +17,8 @@
 
 #include "edge-impulse-sdk/classifier/ei_run_classifier.h"
 
+#include "template.hpp"
+
 using namespace std;
 using namespace cv;
 
@@ -426,17 +428,8 @@ void detect_barcode_lines()
 }
 
 cv::Mat undistorted_template;
-std::vector<Point> template_points;
-std::vector<Mat> templates;
-std::vector<double> templates_match;
-std::vector<Rect> templates_roi;
+std::vector<Point> new_template_points;
 int templ_func_id = 0;
-
-int barcount = 0;
-
-const string config_folder = "config/";
-const string config_filename = "barcode_detection.cfg";
-const string config_filepath = config_folder + config_filename;
 
 //#define UNDISTORT
 //#define NO_GUI
@@ -447,25 +440,27 @@ void onMouse(int event, int x, int y, int flags, void* userdata)
 	{
 		std::cout << "Left button of the mouse is clicked - position (" << x << ", " << y << ")" << std::endl;
 		//
-		if (template_points.size() == 0)
+		if (new_template_points.size() == 0)
 		{
-			template_points.push_back(Point(x, y));
-			template_points.push_back(Point(x, y));
+			new_template_points.push_back(Point(x, y));
+			new_template_points.push_back(Point(x, y));
 		}
-		else if (template_points.size() == 2)
+		else if (new_template_points.size() == 2)
 		{
-			Rect template_roi(
-				template_points[0],
-				template_points[1]
+			Rect new_template_roi(
+				new_template_points[0],
+				new_template_points[1]
 			);
 
-			Mat ROI(undistorted_template, template_roi);
-			Mat croppedImage;
-			ROI.copyTo(croppedImage);
-			templates.push_back(croppedImage);
-			templates_match.push_back(0.5);
+			Template new_template;
+			//
+			Mat ROI(undistorted_template, new_template_roi);
+			ROI.copyTo(new_template.image);
+			new_template.match = 0.5;
+			//
+			templates.push_back(new_template);
 
-			template_points.clear();
+			new_template_points.clear();
 		}
 	}
 	else if (event == cv::EVENT_RBUTTONDOWN)
@@ -476,113 +471,21 @@ void onMouse(int event, int x, int y, int flags, void* userdata)
 	{
 		std::cout << "Middle button of the mouse is clicked - position (" << x << ", " << y << ")" << std::endl;
 		//
-		template_points.clear();
+		new_template_points.clear();
 	}
 	else if (event == cv::EVENT_MOUSEMOVE)
 	{
-		if (template_points.size() == 2)
+		if (new_template_points.size() == 2)
 		{
-			template_points[1].x = x;
-			template_points[1].y = y;
+			new_template_points[1].x = x;
+			new_template_points[1].y = y;
 		}
-	}
-}
-
-void load_config()
-{
-	cout << "config_filepath = " << config_filepath << endl;
-	barcount = 0;
-	templates_match.clear();
-	//
-	std::ifstream file(config_filepath);
-	if (!file) {
-		cout << "load_config() file open error!" << endl;
-	} else {
-		//
-		string s;
-		int i = 0, j;
-		double n, x, y, w, h;
-		while (getline(file, s))
-		{
-			if (!i)
-				barcount = stoi(s);
-			else {
-				std::istringstream is(s);
-				j = 0;
-				while (is >> n)
-				{
-					switch (j++)
-					{
-						case 0:
-							templates_match.push_back(n);
-							break;
-						case 1:
-							x = n;
-							break;
-						case 2:
-							y = n;
-							break;
-						case 3:
-							w = n;
-							break;
-						case 4:
-							h = n;
-							//
-							templates_roi.push_back(Rect(x, y, w, h));
-							break;
-					}
-				}
-			}
-			//
-			i++;
-		}
-		//
-		file.close();
-		cout << "load_config() successfully! barcount = " << barcount << endl;
-		cout << "templates_matches: " << endl;
-		for (size_t j = 0; j < templates_match.size(); j++)
-			cout << templates_match[j] << endl;
-	}
-	//
-	for (int i = 0; i < barcount; i++) {
-		string filepath = config_folder + "barcode" + to_string(i) + ".jpg";
-		Mat templ_file = imread(filepath);
-		templates.push_back(templ_file);
-	}
-}
-
-void save_config()
-{
-	cout << "config_filepath = " << config_filepath << endl;
-	//
-	std::ofstream out;
-	out.open(config_filepath);
-	if (!out.is_open()) {
-		cout << "save_config() file open error!" << endl;
-	} else {
-		//
-		out << templates.size() << endl;
-		for (size_t i = 0; i < templates_match.size(); i++)
-			out << templates_match[i] << " "
-				<< templates_roi[i].x << " "
-				<< templates_roi[i].y << " "
-				<< templates_roi[i].width << " "
-				<< templates_roi[i].height
-				<< endl;
-		//
-		out.close();
-		cout << "save_config() successfully!" << endl;
-	}
-	//
-	for (size_t i = 0; i < templates.size(); i++) {
-		string filepath = config_folder + "barcode" + to_string(i) + ".jpg";
-		imwrite(filepath, templates[i]);
 	}
 }
 
 Mat frame_to_show;
 
-const string TEST_WND_NAME = "Barcode Test";
+const string TEST_WND_NAME = "Templates Test";
 
 void visualizer_func()
 {
@@ -612,7 +515,7 @@ void visualizer_func()
 			templ_func_id = 0;
 
 		if (key == 115) // s
-			save_config();
+			templates_save_config();
 
 		if (key == 27)
 			break;
@@ -677,89 +580,41 @@ void detect_template_func()
 
 			undistorted_to_show = undistorted_template.clone();
 
-			Mat img, templ, mask, result;
-			//
-			int match_method = 5;
-//				0 TM_SQDIFF; M
-//				1 TM_SQDIFF_NORMED;
-//				2 TM_CCORR;
-//				3 TM_CCORR_NORMED; M
-//				4 TM_CCOEFF;
-//				5 TM_CCOEFF_NORMED;
-			//
-			bool use_mask = false;
+			std::vector<DetectionResult> results;
+			templates_detect(undistorted_to_show, results);
 
+		#ifndef NO_GUI
+			Scalar clr;
 			for (size_t i = 0; i < templates.size(); i++)
 			{
-				img = undistorted_template(templates_roi[i]);
-				templ = templates[i];
-				//
-				Mat img_display;
-				img.copyTo( img_display );
-				int result_cols = img.cols - templ.cols + 1;
-				int result_rows = img.rows - templ.rows + 1;
-				result.create( result_rows, result_cols, CV_32FC1 );
-				bool method_accepts_mask = (TM_SQDIFF == match_method || match_method == TM_CCORR_NORMED);
-				if (use_mask && method_accepts_mask)
-				{
-					matchTemplate( img, templ, result, match_method, mask);
-				}
-				else
-				{
-					matchTemplate( img, templ, result, match_method);
-				}
-				//normalize( result, result, 0, 1, NORM_MINMAX, -1, Mat() );
-				double minVal; double maxVal; Point minLoc; Point maxLoc;
-				Point matchLoc; double matchVal;
-				minMaxLoc( result, &minVal, &maxVal, &minLoc, &maxLoc, Mat() );
-				if ( match_method  == TM_SQDIFF || match_method == TM_SQDIFF_NORMED )
-				{
-					matchLoc = minLoc;
-					matchVal = minVal;
-				}
-				else
-				{
-					matchLoc = maxLoc;
-					matchVal = maxVal;
-				}
-
-//				cout << "templ_" << i <<
-//					" minVal=" << minVal <<
-//					" maxVal=" << maxVal <<
-//					" matchVal=" << matchVal
-//				<< endl;
-
-				//
-				Scalar clr = templates_clr[ i % (sizeof(templates_clr) / sizeof(templates_clr[0])) ];
-				//
-				if (matchVal >= templates_match[i])
-				{
-			#ifndef NO_GUI
-					rectangle(undistorted_to_show,
-						matchLoc + templates_roi[i].tl(),
-						Point( matchLoc.x + templ.cols , matchLoc.y + templ.rows ) + templates_roi[i].tl(),
-						clr, 2, 8, 0
-					);
-					putText(undistorted_to_show,
-						"templ_" + to_string(i),
-						matchLoc + Point(10, 15) + templates_roi[i].tl(),
-						cv::FONT_HERSHEY_SIMPLEX, 0.4, clr, 1
-					);
-					putText(undistorted_to_show,
-						to_string(matchVal),
-						matchLoc + Point(10, 30) + templates_roi[i].tl(),
-						cv::FONT_HERSHEY_SIMPLEX, 0.4, clr, 1
-					);
-			#endif
-					//
-					cout << "templ_" << to_string(i) << " found!  " << matchVal << endl;
-				}
-
-			#ifndef NO_GUI
-				rectangle(undistorted_to_show, templates_roi[i].tl(), templates_roi[i].br(), clr, 2);
-			#endif
-
+				clr = templates_clr[ i % (sizeof(templates_clr) / sizeof(templates_clr[0])) ];
+				rectangle(undistorted_to_show,
+					templates[i].roi.tl(),
+					templates[i].roi.br(),
+					clr, 2, 8, 0);
 			}
+			//
+			for (size_t i = 0; i < results.size(); i++)
+			{
+				clr = templates_clr[ results[i].template_id % (sizeof(templates_clr) / sizeof(templates_clr[0])) ];
+				//
+				rectangle(undistorted_to_show,
+					results[i].found_rect.tl(),
+					results[i].found_rect.br(),
+					clr, 2, 8, 0
+				);
+				putText(undistorted_to_show,
+					"templ_" + to_string(results[i].template_id),
+					results[i].found_rect.tl() + Point(10, 15),
+					cv::FONT_HERSHEY_SIMPLEX, 0.4, clr, 1
+				);
+				putText(undistorted_to_show,
+					to_string(results[i].match),
+					results[i].found_rect.tl() + Point(10, 30),
+					cv::FONT_HERSHEY_SIMPLEX, 0.4, clr, 1
+				);
+			}
+		#endif
 
 			tt = (double)(clock() - tStart) / CLOCKS_PER_SEC;
 			if (!tt_cnt) { tt_sum = 0; tt_max = tt; tt_min = tt; }
@@ -779,15 +634,16 @@ void detect_template_func()
 				//
 				tt_cnt = 0;
 			}
-	#ifndef NO_GUI
-			if (template_points.size() == 2)
-				rectangle( undistorted_to_show, template_points[0], template_points[1], CLR_GREEN, 2, 8, 0 );
+
+		#ifndef NO_GUI
+			if (new_template_points.size() == 2)
+				rectangle( undistorted_to_show, new_template_points[0], new_template_points[1], CLR_GREEN, 2, 8, 0 );
 			//
 			frame_to_show = undistorted_to_show.clone();
 			//
 //			for (size_t i = 0; i < templates.size(); i++)
-//				cv::imshow("templ_" + to_string(i), templates[i]);
-	#endif
+//				cv::imshow("templ_" + to_string(i), templates[i].image);
+		#endif
 		}
 	}
 
@@ -795,7 +651,7 @@ void detect_template_func()
 
 void template_detector()
 {
-	load_config();
+	templates_load_config();
 	//
 	thread detect_template_thread(detect_template_func);
 #ifndef NO_GUI
