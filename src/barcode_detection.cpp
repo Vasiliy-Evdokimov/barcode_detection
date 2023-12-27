@@ -15,9 +15,9 @@
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/calib3d/calib3d.hpp>
 
-#include "edge-impulse-sdk/classifier/ei_run_classifier.h"
+#include "templates.hpp"
 
-#include "template.hpp"
+#include "edge-impulse-sdk/classifier/ei_run_classifier.h"
 
 using namespace std;
 using namespace cv;
@@ -580,7 +580,7 @@ void detect_template_func()
 
 			undistorted_to_show = undistorted_template.clone();
 
-			std::vector<DetectionResult> results;
+			std::vector<TemplateDetectionResult> results;
 			templates_detect(undistorted_to_show, results);
 
 		#ifndef NO_GUI

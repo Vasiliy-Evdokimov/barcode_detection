@@ -24,4 +24,11 @@
 		<nature>org.eclipse.cdt.managedbuilder.core.managedBuildNature</nature>
 		<nature>org.eclipse.cdt.managedbuilder.core.ScannerConfigNature</nature>
 	</natures>
+	<linkedResources>
+		<link>
+			<name>src/templates.cpp</name>
+			<type>1</type>
+			<locationURI>WORKSPACE_LOC/line_detection/src/templates.cpp</locationURI>
+		</link>
+	</linkedResources>
 </projectDescription>
